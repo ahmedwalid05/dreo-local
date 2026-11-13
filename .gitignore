@@ -1,0 +1,19 @@
+# secrets & device identity — never commit
+secrets.yaml
+*license*.json
+*keep-private*
+creds_*.json
+*.pem
+*.key
+# firmware / dumps (vendor copyright, contain the license)
+*.bin
+*.img
+*.rbl
+__pycache__/
+*.pyc
+
+# the HESUNG root CA is a PUBLIC certificate the bridge needs (not a secret)
+!**/hesung-root-ca.pem
+
+# local review artifact — not for publishing
+SCRUB-REPORT.md

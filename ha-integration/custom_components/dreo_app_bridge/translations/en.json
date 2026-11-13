@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "Bridge your ESPHome-flashed Dreo device to the Dreo app. Paste the factory license JSON ({sn, signature, ...}) recovered from the device.",
+        "data": {
+          "license_json": "Factory license JSON",
+          "fan_host": "Fan IP / host (ESPHome web server)",
+          "user_id": "Dreo userId",
+          "region": "Region"
+        }
+      }
+    },
+    "error": {
+      "bad_license": "License JSON invalid or missing sn/signature.",
+      "register_failed": "Cloud registration failed (check license/userId/region)."
+    },
+    "abort": { "already_configured": "This device is already bridged." }
+  }
+}

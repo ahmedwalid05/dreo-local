@@ -1,0 +1,389 @@
+# Dreo DR-HCF001S — minimal self-healing control build
+# DP MAP (from stock 3.5.9 CBOR attr table @0xe0553, camera/UI-verified):
+#   dp2=lighton(bool) dp3=fanon(bool) dp4=windlevel(enum1-12) dp5=mode/direction(enum)
+#   dp6=brightness(enum0-100) dp7=colortemp(int32 0-100) dp0C=muteon(bool)
+#   dp0D/0E=timeron/timeroff.du(min) dp0F=scheon dp10=wrong(ro) dp11=scenes(ro) dp20=connected(ro)
+
+esphome:
+  name: dreo-fan
+  friendly_name: "Dreo Ceiling Fan"
+  on_boot:
+    priority: -100
+    then:
+      - delay: 8s
+      - repeat:
+          count: 15
+          then:
+            - lambda: |-
+                static uint8_t hbc = 0; uint8_t s = hbc++;
+                uint8_t f[9] = {0x55,0xAA,0x00,s,0x00,0x00,0x00,0x00,0x00};
+                uint8_t c=0; for(int i=0;i<8;i++) c+=f[i]; f[8]=c;
+                id(uart_bus).write_array(f,9);
+      - delay: 2s
+      - lambda: |-
+            uint8_t f1[12] = {0x55,0xAA,0x00,50,0x03,0x00,0x00,0x02,0x04,0x01,0x00,0x00};
+            uint8_t c=0; for(int i=0;i<11;i++) c+=f1[i]; f1[11]=c;
+            id(uart_bus).write_array(f1,12);
+      - lambda: |-
+            uint8_t f2[12] = {0x55,0xAA,0x00,51,0x03,0x00,0x00,0x02,0x05,0x01,0x00,0x00};
+            uint8_t c=0; for(int i=0;i<11;i++) c+=f2[i]; f2[11]=c;
+            id(uart_bus).write_array(f2,12);
+      - lambda: |-
+            uint8_t f3[12] = {0x55,0xAA,0x00,52,0x03,0x00,0x00,0x02,0x00,0x01,0x00,0x00};
+            uint8_t c3=0; for(int i=0;i<11;i++) c3+=f3[i]; f3[11]=c3;
+            id(uart_bus).write_array(f3,12);
+      - lambda: |-
+            uint8_t f3[9] = {0x55,0xAA,0x00,62,0x08,0x00,0x00,0x00,0x00};
+            uint8_t c=0; for(int i=0;i<8;i++) c+=f3[i]; f3[8]=c;
+            id(uart_bus).write_array(f3,9);
+  platformio_options:
+    board_build.bkcrypt_coeffs: "00000000000000000000000000000000"
+    board_build.bkota.key: "0123456789ABCDEF0123456789ABCDEF"
+    board_build.bkota.iv: "0123456789ABCDEF"
+    board_flash.calibration: "0x1E0000+0x1000"
+    board_flash.download: "0x132000+0xAE000"
+
+bk72xx:
+  board: generic-bk7231n-qfn32-tuya
+  framework:
+    version: latest
+
+logger:
+  level: DEBUG
+  baud_rate: 0
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+  ap:
+    ssid: "DreoFan-Rescue"
+    password: "CHANGE_ME_rescue_ap_password"
+
+captive_portal:
+
+api:
+  encryption:
+    key: "REPLACE_WITH_YOUR_OWN_API_KEY"
+
+ota:
+  - platform: esphome
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+button:
+  - platform: flashdump
+    name: "Flash Dump"
+    id: flash_dump
+  - platform: template
+    name: "U8 Send"
+    id: u8_send
+    on_press:
+      - lambda: |-
+          int vals[7];
+          vals[0] = (int) id(u8_cmd).state;
+          vals[1] = (int) id(u8_b0).state;
+          vals[2] = (int) id(u8_b1).state;
+          vals[3] = (int) id(u8_b2).state;
+          vals[4] = (int) id(u8_b3).state;
+          vals[5] = (int) id(u8_b4).state;
+          vals[6] = (int) id(u8_b5).state;
+          int cmd = vals[0];
+          if (cmd < 0) { ESP_LOGW("raw", "no cmd"); return; }
+          uint8_t payload[6]; int n = 0;
+          for (int i = 1; i <= 6 && vals[i] >= 0; i++) payload[n++] = (uint8_t) vals[i];
+          uint8_t seq = (uint8_t) id(g_seq); id(g_seq) = (id(g_seq) + 1) & 0xFF;
+          uint8_t f[16] = {0x55,0xAA,0x00,seq,(uint8_t)cmd,0x00,0x00,(uint8_t)n,0,0,0,0,0,0,0,0};
+          for (int i = 0; i < n; i++) f[8+i] = payload[i];
+          uint8_t c = 0; for (int i = 0; i < 8 + n; i++) c += f[i];
+          f[8+n] = c;
+          id(uart_bus).write_array(f, 9 + n);
+          ESP_LOGW("raw", "sent cmd=0x%02X len=%d seq=%u", cmd, n, seq);
+
+
+# self-healing: if boot is unsuccessful, retry quickly instead of needing power cycle
+# safe_mode:  invoke after 3 attempts, 60s window, then auto-retry the app
+
+web_server:
+  port: 80
+
+uart:
+  id: uart_bus
+  tx_pin: TX1
+  rx_pin: RX1
+  baud_rate: 115200
+  rx_buffer_size: 512
+
+globals:
+  - id: g_seq
+    type: int
+    restore_value: false
+    initial_value: "1"
+  - id: rxbuf
+    type: std::vector<uint8_t>
+    restore_value: false
+
+script:
+  - id: send_dp
+    parameters:
+      rec: int
+      val: int
+      typ: int
+    then:
+      - lambda: |-
+          uint8_t seq = (uint8_t) id(g_seq); id(g_seq) = (id(g_seq) + 1) & 0xFF;
+          uint8_t nb = (typ == 2) ? 4 : 1;
+          uint8_t len = 5 + nb;
+          uint8_t f[32];
+          f[0]=0x55; f[1]=0xAA; f[2]=0; f[3]=seq; f[4]=0x06; f[5]=0; f[6]=0; f[7]=len;
+          f[8]=rec; f[9]=0x01; f[10]=typ; f[11]=0; f[12]=nb;
+          if (nb == 1) { f[13] = (uint8_t) val; }
+          else { f[13]=0; f[14]=0; f[15]=0; f[16]=(uint8_t) val; }
+          uint8_t s = 0; for (int i = 0; i < 8 + len; i++) s += f[i];
+          f[8+len] = s;
+          id(uart_bus).write_array(f, 9 + len);
+          ESP_LOGW("dp", "send dp%d type%d = %d", rec, typ, val);
+
+
+interval:
+  - interval: 200ms
+    then:
+      - lambda: |-
+          while (id(uart_bus).available()) {
+            uint8_t b; id(uart_bus).read_byte(&b);
+            id(rxbuf).push_back(b);
+          }
+          auto &buf = id(rxbuf);
+          while (buf.size() >= 9) {
+            size_t i = 0;
+            while (i + 1 < buf.size() && !(buf[i] == 0x55 && buf[i+1] == 0xAA)) i++;
+            if (i > 0) buf.erase(buf.begin(), buf.begin() + i);
+            if (buf.size() < 9) break;
+            uint16_t len = (buf[6] << 8) | buf[7];
+            if (len > 300 || buf.size() < 9 + len) break;
+            uint8_t cmd = buf[4], seq = buf[3];
+            uint8_t sum = 0;
+            for (int k = 0; k < 8 + len; k++) sum += buf[k];
+            if (sum == buf[8 + len]) {
+              if (cmd == 0x04 || cmd == 0x10 || cmd == 0x0E) {
+                uint8_t f[9] = {0x55,0xAA,0x00,seq,0x04,0x00,0x00,0x00,0x00};
+                uint8_t s2 = 0; for (int k = 0; k < 8; k++) s2 += f[k]; f[8] = s2;
+                id(uart_bus).write_array(f, 9);
+              } else if (cmd == 0x07 && len > 0) {
+                uint8_t f[9] = {0x55,0xAA,0x00,seq,0x07,0x00,0x00,0x00,0x00};
+                uint8_t s3 = 0; for (int k = 0; k < 8; k++) s3 += f[k]; f[8] = s3;
+                id(uart_bus).write_array(f, 9);
+                char out[160]; int opos = 0; int pos = 0;
+                while (pos + 5 <= len && opos < 140) {
+                  uint8_t rid = buf[8+pos], rty = buf[8+pos+2];
+                  uint8_t rlen = buf[8+pos+4];
+                  if (pos + 5 + rlen > len) break;
+                  uint32_t v = 0;
+                  for (int q = 0; q < rlen && q < 4; q++) v = (v << 8) | buf[8+pos+5+q];
+                  uint8_t rflags = buf[8+pos+1];
+                  // state sync: dp3=light state, dp4=speed (from remote/MCU pushes)
+                  if (rid == 0x02) id(light_sw).publish_state(v != 0);   // dp2 = lighton
+                  if (rid == 0x04) { ESP_LOGW("sync", "report dp4=%u -> publish", v); id(speed_sel).publish_state(std::to_string(v)); }
+                  if (rid == 0x06) id(brightness_num).publish_state((float) v);      // dp6 = brightness
+                  if (rid == 0x0C) id(mute_sw).publish_state(v != 0);                // dp0C = muteon
+                  if (rid == 0x05) id(direction_sel).publish_state(v == 4 ? "Reverse" : "Forward"); // dp5 = mode
+                  opos += snprintf(out + opos, sizeof(out) - opos, "%02X%s=%u ", rid, (rflags & 0x10) ? "~" : "", v);
+                  pos += 5 + rlen;
+                }
+                ESP_LOGW("state", "%s", out);
+                id(dp_dump).publish_state(out);
+              }
+            }
+            buf.erase(buf.begin(), buf.begin() + 9 + len);
+          }
+          if (buf.size() > 1024) buf.clear();
+  - interval: 10s
+    then:
+      - lambda: |-
+          uint8_t seq = (uint8_t) id(g_seq); id(g_seq) = (id(g_seq) + 1) & 0xFF;
+          uint8_t f[9] = {0x55,0xAA,0x00,seq,0x00,0x00,0x00,0x00,0x00};
+          uint8_t c=0; for(int i=0;i<8;i++) c+=f[i]; f[8]=c;
+          id(uart_bus).write_array(f,9);
+      - delay: 500ms
+      - lambda: |-
+          uint8_t seq = (uint8_t) id(g_seq); id(g_seq) = (id(g_seq) + 1) & 0xFF;
+          uint8_t q[9] = {0x55,0xAA,0x00,seq,0x08,0x00,0x00,0x00,0x00};
+          uint8_t c=0; for(int i=0;i<8;i++) c+=q[i]; q[8]=c;
+          id(uart_bus).write_array(q,9);
+  # session maintenance (2026-11-06): switchable protocol experiment rig.
+  # NOTE: the "offline-bit wedge" theory was DISPROVEN 02:25 (measurements were
+  # contaminated by other lights). Online frames kept as plausible hygiene; the
+  # real wedge = MCU apply-lock, unaffected by any maintenance mode. See
+  # research/SESSION-2026-11-06-camera-mcu-lock.md §9.
+  - interval: 5s
+    then:
+      - lambda: |-
+          static uint8_t sc = 200;
+          auto st = [&](uint8_t a, uint8_t b) {
+            uint8_t s2 = sc++;
+            uint8_t f[12] = {0x55,0xAA,0x00,s2,0x03,0x00,0x00,0x02,a,b,0x00,0x00};
+            uint8_t c=0; for(int i=0;i<11;i++) c+=f[i]; f[11]=c;
+            id(uart_bus).write_array(f,12);
+            ESP_LOGW("maint", "cmd3 %02X %02X", a, b);
+          };
+          auto hb = [&]() {
+            uint8_t s2 = sc++;
+            uint8_t f[9] = {0x55,0xAA,0x00,s2,0x00,0x00,0x00,0x00,0x00};
+            uint8_t c=0; for(int i=0;i<8;i++) c+=f[i]; f[8]=c;
+            id(uart_bus).write_array(f,9);
+          };
+          std::string m = id(maint_sel).current_option();
+          if (m == "online") { st(0x00,0x01); st(0x05,0x01); }
+          else if (m == "online5") { st(0x05,0x01); }
+          else if (m == "ladder") { st(0x00,0x00); st(0x01,0x00); hb(); st(0x02,0x00); st(0x02,0x00); st(0x02,0x00); st(0x02,0x00); st(0x02,0x00); st(0x04,0x00); st(0x05,0x00); }
+
+text_sensor:
+  - platform: template
+    name: "DP Dump"
+    id: dp_dump
+    update_interval: never
+
+switch:
+  - platform: template
+    name: "Audio Feedback"
+    id: mute_sw
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    turn_on_action:
+      - lambda: 'id(send_dp)->execute(12, 1, 1);'   # dp0C = muteon (1 = muted)
+    turn_off_action:
+      - lambda: 'id(send_dp)->execute(12, 0, 1);'
+  - platform: template
+    name: "Light"
+    id: light_sw
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    turn_on_action:
+      # 2026-11-06 CAMERA+REMOTE VERIFIED: dp2 IS the light actuator (remote
+      # toggles dp2; module dp2 writes actuate ~100k px on camera). dp3 is NOT
+      # the lamp (does not track the light; writes to it never actuate).
+      # MCU applies on VALUE TRANSITIONS — writing the stored value is a no-op.
+      - lambda: 'id(send_dp)->execute(2, 1, 1);'
+    turn_off_action:
+      - lambda: 'id(send_dp)->execute(2, 0, 1);'
+
+
+select:
+
+  - platform: template
+    name: "Maintenance"
+    id: maint_sel
+    options: ["off", "online", "online5", "ladder"]
+    initial_option: "ladder"
+    optimistic: true
+  - platform: template
+    name: "Direction"
+    id: direction_sel
+    options: ["Forward", "Reverse"]
+    initial_option: "Forward"
+    optimistic: true
+    set_action:
+      # dp5 = mode (enum): Forward=1, Reverse=4 (per family firmware; 712S same encoding)
+      - lambda: 'id(send_dp)->execute(5, x == "Reverse" ? 4 : 1, 4);'
+  - platform: template
+    name: "Speed"
+    id: speed_sel
+    options: ["0","1","2","3","4","5","6","7","8","9","10","11","12"]
+    initial_option: "0"
+    optimistic: true
+    set_action:
+      # per user's proven dreo-final.yaml: speed = dp4 ONLY (0-12, 0=off).
+      # dp1 is PowerOn Memory, not fan power. MCU applies on value transitions.
+      - lambda: |-
+          int v = atoi(x.c_str());
+          id(send_dp)->execute(4, v, 4);
+
+number:
+  - platform: template
+    name: "Brightness"
+    id: brightness_num
+    min_value: 0
+    max_value: 100
+    step: 1
+    mode: slider
+    optimistic: true
+    set_action:
+      # dp6 = brightness, enum type (1 byte 0-100) per stock attr table
+      - lambda: 'id(send_dp)->execute(6, (int) x, 4);'
+
+  - platform: template
+    name: "Color Temp"
+    min_value: 0
+    max_value: 100
+    step: 1
+    mode: box
+    optimistic: true
+    set_action:
+      - lambda: 'id(send_dp)->execute(7, (int) x, 2);'
+  - platform: template
+    name: "U8 Cmd"
+    id: u8_cmd
+    min_value: -1
+    max_value: 255
+    initial_value: -1
+    step: 1
+    optimistic: true
+    mode: box
+  - platform: template
+    name: "U8 B0"
+    id: u8_b0
+    min_value: -1
+    max_value: 255
+    initial_value: -1
+    step: 1
+    optimistic: true
+    mode: box
+  - platform: template
+    name: "U8 B1"
+    id: u8_b1
+    min_value: -1
+    max_value: 255
+    initial_value: -1
+    step: 1
+    optimistic: true
+    mode: box
+  - platform: template
+    name: "U8 B2"
+    id: u8_b2
+    min_value: -1
+    max_value: 255
+    initial_value: -1
+    step: 1
+    optimistic: true
+    mode: box
+  - platform: template
+    name: "U8 B3"
+    id: u8_b3
+    min_value: -1
+    max_value: 255
+    initial_value: -1
+    step: 1
+    optimistic: true
+    mode: box
+  - platform: template
+    name: "U8 B4"
+    id: u8_b4
+    min_value: -1
+    max_value: 255
+    initial_value: -1
+    step: 1
+    optimistic: true
+    mode: box
+  - platform: template
+    name: "U8 B5"
+    id: u8_b5
+    min_value: -1
+    max_value: 255
+    initial_value: -1
+    step: 1
+    optimistic: true
+    mode: box
+  # (dp6 IS brightness — stock attr table; see header. Stale note removed 2026-11-06.)
