@@ -1,7 +1,7 @@
 {
   "domain": "dreo_app_bridge",
   "name": "Dreo App Bridge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "documentation": "https://github.com/ahmedwalid05/dreo-local",
   "issue_tracker": "https://github.com/ahmedwalid05/dreo-local/issues",
   "codeowners": ["@ahmedwalid05"],
