@@ -19,7 +19,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
 
 class DreoBridgeConnected(BinarySensorEntity):
     _attr_has_entity_name = True
-    _attr_device_class = BinarySensorDeviceClass.CONNECTED
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_name = "Connected"
 
     def __init__(self, hass, entry, status):
