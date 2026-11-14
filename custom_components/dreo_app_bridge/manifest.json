@@ -2,8 +2,9 @@
   "domain": "dreo_app_bridge",
   "name": "Dreo App Bridge",
   "version": "1.0.0",
-  "documentation": "https://github.com/ahmadwalid/dreo",
-  "codeowners": ["@ahmadwalid"],
+  "documentation": "https://github.com/ahmedwalid05/dreo-local",
+  "issue_tracker": "https://github.com/ahmedwalid05/dreo-local/issues",
+  "codeowners": ["@ahmedwalid05"],
   "config_flow": true,
   "iot_class": "cloud_push",
   "requirements": ["paho-mqtt==2.1.0"]

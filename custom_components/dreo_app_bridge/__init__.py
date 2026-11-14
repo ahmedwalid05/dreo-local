@@ -6,7 +6,8 @@ import logging, threading
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_FAN_HOST, CONF_REGION, CONF_USER_ID, DEVAPI, DOMAIN
+from .const import (CONF_CLIENT_ID, CONF_CLIENT_SECRET, CONF_FAN_HOST,
+                    CONF_REGION, CONF_USER_ID, DEVAPI, DOMAIN)
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["binary_sensor"]
@@ -24,7 +25,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     thread = threading.Thread(
         target=run_bridge,
         args=(DEVAPI[entry.data[CONF_REGION]], esp, lic,
-              entry.data[CONF_USER_ID], stop, status),
+              entry.data[CONF_USER_ID], entry.data[CONF_CLIENT_ID],
+              entry.data[CONF_CLIENT_SECRET], stop, status),
         name="dreo_app_bridge", daemon=True)
     thread.start()
 

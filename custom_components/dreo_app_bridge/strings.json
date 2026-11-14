@@ -7,6 +7,8 @@
           "license_json": "Factory license JSON",
           "fan_host": "Fan IP / host (ESPHome web server)",
           "user_id": "Dreo userId",
+          "client_id": "Dreo app client_id",
+          "client_secret": "Dreo app client_secret",
           "region": "Region"
         }
       }

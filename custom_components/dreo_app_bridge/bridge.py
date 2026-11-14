@@ -9,8 +9,7 @@ import urllib.error, urllib.request
 
 import paho.mqtt.client as mqtt
 
-from .const import (ACTUATED, CLIENT_ID, CLIENT_SECRET, DEVAPI, MIRROR_DEFAULTS,
-                    META, UA)
+from .const import ACTUATED, DEVAPI, MIRROR_DEFAULTS, META, UA
 
 CA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hesung-root-ca.pem")
 
@@ -32,9 +31,9 @@ def _post(url, body, tok=None, timeout=25):
         return json.loads(r.read())
 
 
-def register(devapi, sn, sig, uid):
+def register(devapi, sn, sig, uid, client_id, client_secret):
     d = _post(f"{devapi}/api/oauth/login?timestamp={int(time.time()*1000)}&lang=en-US",
-              {"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
+              {"client_id": client_id, "client_secret": client_secret,
                "grant_type": "device", "scope": "all", "devicesn": sn})
     tok = (d.get("data") or {}).get("access_token")
     if not tok:
@@ -220,13 +219,15 @@ def connect(creds, bridge_holder):
     return cl, st
 
 
-def run_bridge(devapi, esp, lic, uid, stop: threading.Event, status: dict, poll=1.0):
+def run_bridge(devapi, esp, lic, uid, client_id, client_secret,
+               stop: threading.Event, status: dict, poll=1.0):
     """Thread target: the daemon loop. Updates status for the HA entity."""
     while not stop.is_set():
         cl = None
         try:
             status.update(state="registering", error=None)
-            creds = register(devapi, lic["sn"], lic["signature"], uid)
+            creds = register(devapi, lic["sn"], lic["signature"], uid,
+                             client_id, client_secret)
             holder = {}
             cl, st = connect(creds, holder)
             b = Bridge(esp, lic["sn"], creds.get("prefix", "$emq"), cl)

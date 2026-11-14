@@ -16,10 +16,11 @@ ESPHome-flashed Dreo device, exactly like `tools/dreo_bridge.py` did.
    enabled in your HA profile, and may need a cache refresh — if it doesn't
    appear, wait 30s and reload the page).
 4. Fill the form:
-   - **Factory license JSON**: paste the contents of `MY-FAN-LICENSE-…json`
+   - **Factory license JSON**: paste the contents of your `license.json`
      (kept out of the component on purpose — it is your device's identity!)
    - **Fan IP**: `dreo-fan.local`
-   - **userId**: prefilled
+   - **userId**: your Dreo account userId
+   - **client_id / client_secret**: the Dreo app's client pair
    - **Region**: EU
    It validates against the Dreo API before saving.
 5. A `binary_sensor.dreo_app_bridge_connected` device appears; ON = the Dreo
@@ -34,4 +35,4 @@ Then stop the old PC bridge (it re-mints credentials and would fight):
 - Uninstall = remove the integration + delete the folder.
 - All bridge semantics (ghost-absorbing desired-align publish, remembered
   speed, echo suppression) are identical to the battle-tested daemon —
-  see ~/projects/dreo/research/dreo-bridge.md.
+  see `docs/dreo-bridge.md`.
